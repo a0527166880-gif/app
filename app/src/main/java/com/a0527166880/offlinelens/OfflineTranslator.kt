@@ -7,7 +7,9 @@ import ai.onnxruntime.OrtSession
 import ai.onnxruntime.TensorInfo
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.FloatBuffer
 import java.nio.LongBuffer
+import kotlin.math.max
 import kotlin.math.min
 
 class OfflineTranslator(private val context: android.content.Context) : AutoCloseable {
@@ -17,9 +19,8 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
     private var decoder: OrtSession? = null
     private var tokenizer: HuggingFaceTokenizer? = null
 
-    // M2M100 language-token IDs. The base vocabulary ends at 128003;
-    // language tokens are appended in the canonical M2M100 order.
-    private val langIds = mapOf(
+    // SMaLL-100 / M2M-100 language ids used by the tokenizer vocabulary.
+    private val targetLangIds = mapOf(
         "ערבית" to 128006L,
         "עברית" to 128035L,
         "אנגלית" to 128022L,
@@ -33,105 +34,102 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
 
         synchronized(lock) {
             ensureLoaded()
+            val targetId = targetLangIds[target] ?: return clean
 
-            val src = langIds[source] ?: return clean
-            val tgt = langIds[target] ?: return clean
-
+            // SMaLL-100 selects the target language by prepending its language token
+            // to the SOURCE sequence. The tokenizer itself appends EOS only when
+            // special tokens are requested, so we append EOS explicitly here.
             val encoded = tokenizer!!.encode(clean, false, false).ids
-            val tokenCount = min(encoded.size, 240)
-
-            // M2M100 input: [source-language] + sentence tokens + EOS.
+            val tokenCount = min(encoded.size, 160)
             val body = LongArray(tokenCount + 2)
-            body[0] = src
+            body[0] = targetId
             for (i in 0 until tokenCount) body[i + 1] = encoded[i]
-            body[body.size - 1] = 2L
+            body[body.lastIndex] = 2L
 
-            val encoderInputs = HashMap<String, OnnxTensor>()
-            encoderInputs["input_ids"] = longTensor(
-                body,
-                longArrayOf(1, body.size.toLong())
-            )
-            encoderInputs["attention_mask"] = longTensor(
+            val inputIds = longTensor(body, longArrayOf(1L, body.size.toLong()))
+            val attentionMask = longTensor(
                 LongArray(body.size) { 1L },
-                longArrayOf(1, body.size.toLong())
+                longArrayOf(1L, body.size.toLong())
+            )
+            val encoderInputs = hashMapOf<String, OnnxTensor>(
+                "input_ids" to inputIds,
+                "attention_mask" to attentionMask
             )
 
-            val result = encoder!!.run(encoderInputs)
-            val hidden = result[0] as OnnxTensor
+            val encoderResult = encoder!!.run(encoderInputs)
+            val hidden = encoderResult[0] as OnnxTensor
 
             return try {
-                decode(hidden, body.size, tgt)
+                decodeGreedy(hidden, body.size)
             } finally {
                 hidden.close()
-                result.close()
-                encoderInputs.values.forEach { it.close() }
+                encoderResult.close()
+                inputIds.close()
+                attentionMask.close()
             }
         }
     }
 
-    private fun decode(
-        hidden: OnnxTensor,
-        sourceLength: Int,
-        targetLangId: Long
-    ): String {
+    private fun decodeGreedy(hidden: OnnxTensor, sourceLength: Int): String {
         val session = decoder!!
         val inputNames = session.inputInfo.keys.toList()
         val outputNames = session.outputInfo.keys.toList()
-        val generated = ArrayList<Long>(64)
+        val generated = ArrayList<Long>(48)
+        var decoderIds = longArrayOf(2L)
 
-        // M2M100 starts decoding with EOS and forces the first generated token
-        // to be the target language code. Supplying it explicitly avoids a
-        // dependency on the generation API inside the Android app.
-        var decoderIds = longArrayOf(2L, targetLangId)
-
-        for (step in 0 until 64) {
+        for (step in 0 until 48) {
             val inputs = HashMap<String, OnnxTensor>()
             val owned = ArrayList<OnnxTensor>()
 
             for (name in inputNames) {
                 val lower = name.lowercase()
                 when {
-                    lower.contains("input_ids") -> {
-                        val tensor = longTensor(
+                    lower == "input_ids" -> {
+                        val t = longTensor(
                             decoderIds,
-                            longArrayOf(1, decoderIds.size.toLong())
+                            longArrayOf(1L, decoderIds.size.toLong())
                         )
-                        inputs[name] = tensor
-                        owned += tensor
+                        inputs[name] = t
+                        owned += t
                     }
-                    lower.contains("encoder_hidden_states") -> {
+
+                    lower == "encoder_hidden_states" -> {
                         inputs[name] = hidden
                     }
-                    lower.contains("encoder_attention_mask") -> {
-                        val tensor = longTensor(
+
+                    lower == "encoder_attention_mask" -> {
+                        val t = longTensor(
                             LongArray(sourceLength) { 1L },
-                            longArrayOf(1, sourceLength.toLong())
+                            longArrayOf(1L, sourceLength.toLong())
                         )
-                        inputs[name] = tensor
-                        owned += tensor
+                        inputs[name] = t
+                        owned += t
                     }
-                    lower.contains("attention_mask") -> {
-                        val tensor = longTensor(
-                            LongArray(decoderIds.size) { 1L },
-                            longArrayOf(1, decoderIds.size.toLong())
-                        )
-                        inputs[name] = tensor
-                        owned += tensor
+
+                    lower == "use_cache_branch" -> {
+                        inputs[name] = booleanTensor(false)
                     }
+
+                    lower.startsWith("past_key_values.") -> {
+                        val t = emptyPastTensor(name, sourceLength)
+                        inputs[name] = t
+                        owned += t
+                    }
+
                     else -> {
-                        // Some ONNX exports expose optional inputs. Feed a
-                        // scalar zero for those; standard M2M100 exports do
-                        // not require them.
-                        val tensor = longTensor(longArrayOf(0L), longArrayOf(1))
-                        inputs[name] = tensor
-                        owned += tensor
+                        // Keep the merged decoder happy if an export exposes an
+                        // additional attention mask. The current SMaLL-100 export
+                        // uses only the standard inputs handled above.
+                        val t = longTensor(longArrayOf(1L), longArrayOf(1L))
+                        inputs[name] = t
+                        owned += t
                     }
                 }
             }
 
             val result = session.run(inputs)
             val logitsIndex = outputNames.indexOfFirst {
-                it.lowercase().contains("logits")
+                it.lowercase() == "logits"
             }.let { if (it >= 0) it else 0 }
             val logits = result[logitsIndex] as OnnxTensor
 
@@ -148,6 +146,35 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
         }
 
         return tokenizer!!.decode(generated.toLongArray(), true).trim()
+    }
+
+    private fun emptyPastTensor(name: String, sourceLength: Int): OnnxTensor {
+        val info = decoder!!.inputInfo[name]!!.info as TensorInfo
+        val rawShape = info.shape
+        val isEncoderCache = name.contains(".encoder.")
+        val shape = LongArray(rawShape.size)
+
+        for (i in rawShape.indices) {
+            val fallback = when (i) {
+                0 -> 1L
+                1 -> 16L
+                rawShape.lastIndex -> 64L
+                else -> 0L
+            }
+            var dim = rawShape[i]
+            if (dim < 0L) dim = fallback
+            if (i == 2 && rawShape.size >= 4) {
+                dim = if (isEncoderCache) sourceLength.toLong() else 0L
+            }
+            shape[i] = max(0L, dim)
+        }
+
+        val elements = shape.fold(1L) { a, b -> a * b }.toInt()
+        return OnnxTensor.createTensor(
+            env,
+            FloatBuffer.wrap(FloatArray(elements)),
+            shape
+        )
     }
 
     private fun argmaxLastStep(tensor: OnnxTensor): Long {
@@ -173,6 +200,9 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
     private fun longTensor(values: LongArray, shape: LongArray): OnnxTensor =
         OnnxTensor.createTensor(env, LongBuffer.wrap(values), shape)
 
+    private fun booleanTensor(value: Boolean): OnnxTensor =
+        OnnxTensor.createTensor(env, booleanArrayOf(value))
+
     private fun ensureLoaded() {
         if (encoder != null && decoder != null && tokenizer != null) return
 
@@ -180,12 +210,12 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
         if (!dir.exists()) dir.mkdirs()
 
         val encFile = copyAsset(
-            "models/encoder_model_quantized.onnx",
-            File(dir, "encoder_model_quantized.onnx")
+            "models/encoder_model.onnx",
+            File(dir, "encoder_model.onnx")
         )
         val decFile = copyAsset(
-            "models/decoder_model_quantized.onnx",
-            File(dir, "decoder_model_quantized.onnx")
+            "models/decoder_model_merged.onnx",
+            File(dir, "decoder_model_merged.onnx")
         )
         val tokFile = copyAsset(
             "models/tokenizer.json",
