@@ -66,3 +66,5 @@ class OfflineOcr(private val context: Context) {
         activeLang = language
     }
 }
+
+// CI artifact retrieval trigger.
