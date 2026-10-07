@@ -23,7 +23,7 @@ jobs:
           for lang in eng ara heb rus chi_sim; do
             curl -L --fail --retry 5 --retry-delay 3 -o "app/src/main/assets/tessdata/$lang.traineddata" "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata"
           done
-          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/jniLibs/arm64-v8a/libdjl_tokenizer.so "https://publish.djl.ai/tokenizers/0.21.0/jnilib/0.39.0/android/arm64-v8a/libdjl_tokenizer.so"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/jniLibs/arm64-v8a/libdjl_tokenizer.so "https://publish.djl.ai/tokenizers/0.21.0/jnilib/0.38.0/android/arm64-v8a/libdjl_tokenizer.so"
           python3 -m pip install --quiet --disable-pip-version-check "transformers==4.57.1" "sentencepiece"
           python3 - <<'PY'
           from transformers import AutoTokenizer
