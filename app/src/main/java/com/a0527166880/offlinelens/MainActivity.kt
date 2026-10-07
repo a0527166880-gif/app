@@ -2,6 +2,12 @@ package com.a0527166880.offlinelens
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.Rect
+import android.graphics.YuvImage
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -9,8 +15,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
-import androidx.camera.core.toBitmap
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
@@ -31,9 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import androidx.core.graphics.scale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.Executors
 
 private val Bg = Color(0xFF0D1016)
@@ -306,7 +312,7 @@ fun CameraBox(
 
                 analyzer.setAnalyzer(executor) { image ->
                     val now = System.currentTimeMillis()
-                    if (now - lastRun.longValue < 900L) {
+                    if (now - lastRun.longValue < 1000L) {
                         image.close()
                         return@setAnalyzer
                     }
@@ -314,11 +320,13 @@ fun CameraBox(
                     lastRun.longValue = now
 
                     try {
-                        val bitmap = image.toBitmap()
+                        val bitmap = imageProxyToBitmap(image)
                         val scaled = if (bitmap.width > 1280) {
-                            bitmap.scale(
+                            Bitmap.createScaledBitmap(
+                                bitmap,
                                 1280,
-                                (bitmap.height * 1280f / bitmap.width).toInt()
+                                (bitmap.height * 1280f / bitmap.width).toInt(),
+                                true
                             )
                         } else {
                             bitmap
@@ -352,4 +360,76 @@ fun CameraBox(
         },
         modifier = Modifier.fillMaxSize()
     )
+}
+
+private fun imageProxyToBitmap(image: ImageProxy): Bitmap {
+    val width = image.width
+    val height = image.height
+    val planes = image.planes
+
+    val yPlane = planes[0]
+    val uPlane = planes[1]
+    val vPlane = planes[2]
+
+    val nv21 = ByteArray(width * height + width * height / 2)
+    var offset = 0
+
+    for (row in 0 until height) {
+        val rowStart = row * yPlane.rowStride
+        for (col in 0 until width) {
+            nv21[offset++] = yPlane.buffer.get(rowStart + col)
+        }
+    }
+
+    val chromaHeight = height / 2
+    val chromaWidth = width / 2
+    for (row in 0 until chromaHeight) {
+        val uRow = row * uPlane.rowStride
+        val vRow = row * vPlane.rowStride
+        for (col in 0 until chromaWidth) {
+            val uIndex = uRow + col * uPlane.pixelStride
+            val vIndex = vRow + col * vPlane.pixelStride
+            nv21[offset++] = vPlane.buffer.get(vIndex)
+            nv21[offset++] = uPlane.buffer.get(uIndex)
+        }
+    }
+
+    val yuv = YuvImage(
+        nv21,
+        ImageFormat.NV21,
+        width,
+        height,
+        null
+    )
+
+    val out = ByteArrayOutputStream()
+    check(
+        yuv.compressToJpeg(
+            Rect(0, 0, width, height),
+            88,
+            out
+        )
+    )
+
+    val raw = BitmapFactory.decodeByteArray(out.toByteArray(), 0, out.size())
+        ?: error("Failed to decode camera frame")
+
+    val rotation = image.imageInfo.rotationDegrees
+    if (rotation == 0) return raw
+
+    val matrix = Matrix().apply {
+        postRotate(rotation.toFloat())
+    }
+
+    return Bitmap.createBitmap(
+        raw,
+        0,
+        0,
+        raw.width,
+        raw.height,
+        matrix,
+        true
+    ).also {
+        raw.recycle()
+    }
 }
