@@ -12,29 +12,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Download bundled offline OCR, tokenizer and translation models
+      - name: Download bundled offline OCR and compact translation model
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p app/src/main/assets/models app/src/main/assets/tessdata app/src/main/jniLibs/arm64-v8a
-          HF="https://huggingface.co/tfchan-lab/nllb-200-distilled-600M-onnx/resolve/main"
-          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/encoder_model_int8.onnx "$HF/encoder_model_int8.onnx"
-          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/decoder_model_int8.onnx "$HF/decoder_model_int8.onnx"
+          mkdir -p app/src/main/assets/models app/src/main/assets/tessdata
+          HF="https://huggingface.co/huggingworld/m2m100_418M/resolve/main"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/encoder_model_quantized.onnx "$HF/onnx/encoder_model_quantized.onnx"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/decoder_model_quantized.onnx "$HF/onnx/decoder_model_quantized.onnx"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/tokenizer.json "$HF/tokenizer.json"
           for lang in eng ara heb rus chi_sim; do
             curl -L --fail --retry 5 --retry-delay 3 -o "app/src/main/assets/tessdata/$lang.traineddata" "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata"
           done
-          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/jniLibs/arm64-v8a/libdjl_tokenizer.so "https://publish.djl.ai/tokenizers/0.21.0/jnilib/0.38.0/android/arm64-v8a/libdjl_tokenizer.so"
-          python3 -m pip install --quiet --disable-pip-version-check "transformers==4.57.1" "sentencepiece"
-          python3 - <<'PY'
-          from transformers import AutoTokenizer
-          tokenizer = AutoTokenizer.from_pretrained(
-              "facebook/nllb-200-distilled-600M",
-              use_fast=True,
-          )
-          tokenizer.save_pretrained("app/src/main/assets/.tokenizer")
-          PY
-          cp app/src/main/assets/.tokenizer/tokenizer.json app/src/main/assets/models/tokenizer.json
-          rm -rf app/src/main/assets/.tokenizer
       - name: Build signed debug APK
         run: gradle :app:assembleDebug --no-daemon
       - name: Verify APK signing and checksum
@@ -47,41 +36,24 @@ jobs:
           sha256sum "$APK" > "$APK.sha256"
           stat -c '%n %s bytes' "$APK"
           cat "$APK.sha256"
-      - name: Split APK for download limits
+      - name: Split APK only if it is still over the attachment limit
         shell: bash
         run: |
           set -euo pipefail
           APK=app/build/outputs/apk/debug/app-debug.apk
+          SIZE=$(stat -c %s "$APK")
           mkdir -p app/build/outputs/apk/parts
-          split -b 320M -d -a 2 "$APK" app/build/outputs/apk/parts/app-debug.apk.part-
+          if [ "$SIZE" -gt 500000000 ]; then
+            split -b 250M -d -a 2 "$APK" app/build/outputs/apk/parts/app-debug.apk.part-
+          else
+            cp "$APK" app/build/outputs/apk/parts/app-debug.apk
+          fi
           ls -lh app/build/outputs/apk/parts
       - uses: actions/upload-artifact@v4
         with:
-          name: LensTranslate-apk-part1
-          path: app/build/outputs/apk/parts/app-debug.apk.part-00
-          if-no-files-found: error
-          retention-days: 90
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LensTranslate-apk-part2
-          path: app/build/outputs/apk/parts/app-debug.apk.part-01
-          if-no-files-found: error
-          retention-days: 90
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LensTranslate-apk-part3
-          path: app/build/outputs/apk/parts/app-debug.apk.part-02
-          if-no-files-found: error
-          retention-days: 90
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LensTranslate-apk-part4
-          path: app/build/outputs/apk/parts/app-debug.apk.part-03
-          if-no-files-found: error
-          retention-days: 90
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LensTranslate-apk-checksum
-          path: app/build/outputs/apk/debug/app-debug.apk.sha256
+          name: LensTranslate-apk
+          path: |
+            app/build/outputs/apk/parts/*
+            app/build/outputs/apk/debug/app-debug.apk.sha256
           if-no-files-found: error
           retention-days: 90
