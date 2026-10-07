@@ -22,9 +22,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p app/src/main/assets/models app/src/main/assets/tessdata
-          HF="https://huggingface.co/huggingworld/m2m100_418M/resolve/main"
-          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/encoder_model_quantized.onnx "$HF/onnx/encoder_model_quantized.onnx"
-          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/decoder_model_quantized.onnx "$HF/onnx/decoder_model_quantized.onnx"
+          HF="https://huggingface.co/casawolice/small100-onnx/resolve/main"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/encoder_model.onnx "$HF/onnx/encoder_model.onnx"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/decoder_model_merged.onnx "$HF/onnx/decoder_model_merged.onnx"
           curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/tokenizer.json "$HF/tokenizer.json"
           for lang in eng ara heb rus chi_sim; do
             curl -L --fail --retry 5 --retry-delay 3 -o "app/src/main/assets/tessdata/$lang.traineddata" "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata"
@@ -70,24 +70,4 @@ jobs:
         run: |
           set -euo pipefail
           TAG="compact-${GITHUB_SHA::12}"
-          gh release create "$TAG" "app/build/outputs/apk/debug/app-debug.apk" "app/build/outputs/apk/debug/app-debug.apk.sha256" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "LensTranslate compact APK ${GITHUB_SHA::12}" \
-            --notes "Signed offline APK build. The APK contains bundled OCR and offline translation models."
-      - name: Publish build metadata
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          TAG="compact-${GITHUB_SHA::12}"
-          APK=app/build/outputs/apk/debug/app-debug.apk
-          SIZE=$(stat -c %s "$APK")
-          SHA=$(cut -d' ' -f1 "$APK.sha256")
-          printf 'status=success\ncommit=%s\ntag=%s\nsize_bytes=%s\nsha256=%s\nurl=https://github.com/%s/releases/download/%s/app-debug.apk\n'             "$GITHUB_SHA" "$TAG" "$SIZE" "$SHA" "$GITHUB_REPOSITORY" "$TAG" > build-result.txt
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add build-result.txt
-          git diff --cached --quiet || git commit -m "Record compact APK build result [skip ci]"
-          git push
+          gh release create "$TAG" "app/build/outputs/apk/debug/app-debug.apk" "app/build/outputs/apk/debug/app-debug.apk.sha256"             --repo "$GITHUB_REPOSITORY"             --title "LensTranslate compact APK ${GITHUB_SHA::12}"             --notes "Signed offline APK build. The APK contains bundled OCR and offline translation models."
