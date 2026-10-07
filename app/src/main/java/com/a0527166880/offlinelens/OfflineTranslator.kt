@@ -7,7 +7,6 @@ import ai.onnxruntime.OrtSession
 import ai.onnxruntime.TensorInfo
 import java.io.File
 import java.io.FileOutputStream
-import java.nio.FloatBuffer
 import java.nio.LongBuffer
 import kotlin.math.min
 
@@ -20,10 +19,10 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
 
     private val langIds = mapOf(
         "עברית" to 256067L,
-        "ערבית" to 256011L,
+        "ערבית" to 256087L,
         "אנגלית" to 256047L,
-        "סינית" to 256200L,
-        "רוסית" to 256147L
+        "סינית" to 256167L,
+        "רוסית" to 256150L
     )
 
     fun translate(text: String, source: String, target: String): String {
@@ -77,24 +76,26 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
                 val lower = name.lowercase()
                 when {
                     lower.contains("input_ids") -> {
-                        val t = longTensor(decoderIds, longArrayOf(1, decoderIds.size.toLong()))
-                        inputs[name] = t
-                        owned += t
+                        val tensor = longTensor(
+                            decoderIds,
+                            longArrayOf(1, decoderIds.size.toLong())
+                        )
+                        inputs[name] = tensor
+                        owned += tensor
                     }
                     lower.contains("encoder_hidden_states") -> inputs[name] = hidden
-                    lower.contains("encoder_attention_mask") ||
-                        (lower.contains("attention_mask") && !lower.contains("decoder")) -> {
-                        val t = longTensor(
+                    lower.contains("encoder_attention_mask") -> {
+                        val tensor = longTensor(
                             LongArray(sourceLength) { 1L },
                             longArrayOf(1, sourceLength.toLong())
                         )
-                        inputs[name] = t
-                        owned += t
+                        inputs[name] = tensor
+                        owned += tensor
                     }
                     else -> {
-                        val t = longTensor(longArrayOf(0L), longArrayOf(1))
-                        inputs[name] = t
-                        owned += t
+                        val tensor = longTensor(longArrayOf(0L), longArrayOf(1))
+                        inputs[name] = tensor
+                        owned += tensor
                     }
                 }
             }
@@ -112,7 +113,7 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
                 if (chosen == 2L) break
 
                 generated += chosen
-                decoderIds = decoderIds + chosen
+                decoderIds += chosen
             } finally {
                 logits.close()
                 result.close()
