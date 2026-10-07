@@ -1,28 +1,35 @@
 name: Build Offline APK
 on: [push, workflow_dispatch]
 jobs:
- build:
-  runs-on: ubuntu-latest
-  steps:
-   - uses: actions/checkout@v4
-   - uses: actions/setup-java@v4
-     with: {distribution: temurin, java-version: '17'}
-   - uses: gradle/actions/setup-gradle@v4
-     with: {gradle-version: '8.13'}
-   - name: Download bundled offline OCR and translation models
-     shell: bash
-     run: |
-       set -euo pipefail
-       mkdir -p app/src/main/assets/models app/src/main/assets/tessdata
-       HF="https://huggingface.co/Hosstia/nllb-200-distilled-600m-onnx/resolve/main"
-       curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/encoder_model_int8.onnx "$HF/encoder_model_int8.onnx"
-       curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/decoder_with_past_model_int8.onnx "$HF/decoder_with_past_model_int8.onnx"
-       curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/tokenizer.json "$HF/tokenizer.json"
-       for lang in eng ara heb rus chi_sim; do
-         curl -L --fail --retry 5 --retry-delay 3 -o "app/src/main/assets/tessdata/$lang.traineddata" "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata"
-       done
-       ls -lh app/src/main/assets/models app/src/main/assets/tessdata
-   - name: Build signed debug APK
-     run: gradle :app:assembleDebug --no-daemon
-   - uses: actions/upload-artifact@v4
-     with: {name: LensTranslate-offline-signed, path: app/build/outputs/apk/debug/app-debug.apk, if-no-files-found: error, retention-days: 90}
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+      - name: Download bundled offline OCR and translation models
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p app/src/main/assets/models app/src/main/assets/tessdata
+          HF="https://huggingface.co/Hosstia/nllb-200-distilled-600m-onnx/resolve/main"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/encoder_model_int8.onnx "$HF/encoder_model_int8.onnx"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/decoder_model_int8.onnx "$HF/decoder_model_int8.onnx"
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/tokenizer.json "$HF/tokenizer.json"
+          for lang in eng ara heb rus chi_sim; do
+            curl -L --fail --retry 5 --retry-delay 3 -o "app/src/main/assets/tessdata/$lang.traineddata" "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata"
+          done
+          ls -lh app/src/main/assets/models app/src/main/assets/tessdata
+      - name: Build signed debug APK
+        run: gradle :app:assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LensTranslate-offline-signed
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 90
