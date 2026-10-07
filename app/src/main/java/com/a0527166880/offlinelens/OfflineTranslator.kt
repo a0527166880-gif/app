@@ -17,12 +17,14 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
     private var decoder: OrtSession? = null
     private var tokenizer: HuggingFaceTokenizer? = null
 
+    // M2M100 language-token IDs. The base vocabulary ends at 128003;
+    // language tokens are appended in the canonical M2M100 order.
     private val langIds = mapOf(
-        "עברית" to 256067L,
-        "ערבית" to 256087L,
-        "אנגלית" to 256047L,
-        "סינית" to 256167L,
-        "רוסית" to 256150L
+        "ערבית" to 128006L,
+        "עברית" to 128035L,
+        "אנגלית" to 128022L,
+        "סינית" to 128102L,
+        "רוסית" to 128077L
     )
 
     fun translate(text: String, source: String, target: String): String {
@@ -37,13 +39,18 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
 
             val encoded = tokenizer!!.encode(clean, false, false).ids
             val tokenCount = min(encoded.size, 240)
+
+            // M2M100 input: [source-language] + sentence tokens + EOS.
             val body = LongArray(tokenCount + 2)
             body[0] = src
             for (i in 0 until tokenCount) body[i + 1] = encoded[i]
             body[body.size - 1] = 2L
 
             val encoderInputs = HashMap<String, OnnxTensor>()
-            encoderInputs["input_ids"] = longTensor(body, longArrayOf(1, body.size.toLong()))
+            encoderInputs["input_ids"] = longTensor(
+                body,
+                longArrayOf(1, body.size.toLong())
+            )
             encoderInputs["attention_mask"] = longTensor(
                 LongArray(body.size) { 1L },
                 longArrayOf(1, body.size.toLong())
@@ -51,6 +58,7 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
 
             val result = encoder!!.run(encoderInputs)
             val hidden = result[0] as OnnxTensor
+
             return try {
                 decode(hidden, body.size, tgt)
             } finally {
@@ -61,14 +69,22 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
         }
     }
 
-    private fun decode(hidden: OnnxTensor, sourceLength: Int, targetLangId: Long): String {
+    private fun decode(
+        hidden: OnnxTensor,
+        sourceLength: Int,
+        targetLangId: Long
+    ): String {
         val session = decoder!!
         val inputNames = session.inputInfo.keys.toList()
         val outputNames = session.outputInfo.keys.toList()
-        val generated = ArrayList<Long>(48)
+        val generated = ArrayList<Long>(64)
+
+        // M2M100 starts decoding with EOS and forces the first generated token
+        // to be the target language code. Supplying it explicitly avoids a
+        // dependency on the generation API inside the Android app.
         var decoderIds = longArrayOf(2L, targetLangId)
 
-        for (step in 0 until 48) {
+        for (step in 0 until 64) {
             val inputs = HashMap<String, OnnxTensor>()
             val owned = ArrayList<OnnxTensor>()
 
@@ -83,7 +99,9 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
                         inputs[name] = tensor
                         owned += tensor
                     }
-                    lower.contains("encoder_hidden_states") -> inputs[name] = hidden
+                    lower.contains("encoder_hidden_states") -> {
+                        inputs[name] = hidden
+                    }
                     lower.contains("encoder_attention_mask") -> {
                         val tensor = longTensor(
                             LongArray(sourceLength) { 1L },
@@ -92,7 +110,18 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
                         inputs[name] = tensor
                         owned += tensor
                     }
+                    lower.contains("attention_mask") -> {
+                        val tensor = longTensor(
+                            LongArray(decoderIds.size) { 1L },
+                            longArrayOf(1, decoderIds.size.toLong())
+                        )
+                        inputs[name] = tensor
+                        owned += tensor
+                    }
                     else -> {
+                        // Some ONNX exports expose optional inputs. Feed a
+                        // scalar zero for those; standard M2M100 exports do
+                        // not require them.
                         val tensor = longTensor(longArrayOf(0L), longArrayOf(1))
                         inputs[name] = tensor
                         owned += tensor
@@ -151,12 +180,12 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
         if (!dir.exists()) dir.mkdirs()
 
         val encFile = copyAsset(
-            "models/encoder_model_int8.onnx",
-            File(dir, "encoder_model_int8.onnx")
+            "models/encoder_model_quantized.onnx",
+            File(dir, "encoder_model_quantized.onnx")
         )
         val decFile = copyAsset(
-            "models/decoder_model_int8.onnx",
-            File(dir, "decoder_model_int8.onnx")
+            "models/decoder_model_quantized.onnx",
+            File(dir, "decoder_model_quantized.onnx")
         )
         val tokFile = copyAsset(
             "models/tokenizer.json",
