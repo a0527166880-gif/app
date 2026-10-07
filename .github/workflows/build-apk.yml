@@ -17,13 +17,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p app/src/main/assets/models app/src/main/assets/tessdata
-          HF="https://huggingface.co/Hosstia/nllb-200-distilled-600m-onnx/resolve/main"
+          HF="https://huggingface.co/tfchan-lab/nllb-200-distilled-600M-onnx/resolve/main"
           curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/encoder_model_int8.onnx "$HF/encoder_model_int8.onnx"
           curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/decoder_model_int8.onnx "$HF/decoder_model_int8.onnx"
-          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/tokenizer.json "$HF/tokenizer.json"
           for lang in eng ara heb rus chi_sim; do
             curl -L --fail --retry 5 --retry-delay 3 -o "app/src/main/assets/tessdata/$lang.traineddata" "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata"
           done
+          python3 -m pip install --quiet --disable-pip-version-check "transformers==4.57.1" "sentencepiece"
+          python3 - <<'PY'
+          from transformers import AutoTokenizer
+          tokenizer = AutoTokenizer.from_pretrained(
+              "facebook/nllb-200-distilled-600M",
+              use_fast=True,
+          )
+          tokenizer.save_pretrained("app/src/main/assets/.tokenizer")
+          PY
+          cp app/src/main/assets/.tokenizer/tokenizer.json app/src/main/assets/models/tokenizer.json
+          rm -rf app/src/main/assets/.tokenizer
           ls -lh app/src/main/assets/models app/src/main/assets/tessdata
       - name: Build signed debug APK
         run: gradle :app:assembleDebug --no-daemon
