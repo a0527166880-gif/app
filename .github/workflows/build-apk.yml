@@ -12,17 +12,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.13'
-      - name: Download bundled offline OCR and translation models
+      - name: Download bundled offline OCR, tokenizer and translation models
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p app/src/main/assets/models app/src/main/assets/tessdata
+          mkdir -p app/src/main/assets/models app/src/main/assets/tessdata app/src/main/jniLibs/arm64-v8a
           HF="https://huggingface.co/tfchan-lab/nllb-200-distilled-600M-onnx/resolve/main"
           curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/encoder_model_int8.onnx "$HF/encoder_model_int8.onnx"
           curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/assets/models/decoder_model_int8.onnx "$HF/decoder_model_int8.onnx"
           for lang in eng ara heb rus chi_sim; do
             curl -L --fail --retry 5 --retry-delay 3 -o "app/src/main/assets/tessdata/$lang.traineddata" "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata"
           done
+          curl -L --fail --retry 5 --retry-delay 3 -o app/src/main/jniLibs/arm64-v8a/libdjl_tokenizer.so "https://publish.djl.ai/tokenizers/0.21.0/jnilib/0.39.0/android/arm64-v8a/libdjl_tokenizer.so"
           python3 -m pip install --quiet --disable-pip-version-check "transformers==4.57.1" "sentencepiece"
           python3 - <<'PY'
           from transformers import AutoTokenizer
@@ -34,9 +35,14 @@ jobs:
           PY
           cp app/src/main/assets/.tokenizer/tokenizer.json app/src/main/assets/models/tokenizer.json
           rm -rf app/src/main/assets/.tokenizer
-          ls -lh app/src/main/assets/models app/src/main/assets/tessdata
+          ls -lh app/src/main/assets/models app/src/main/assets/tessdata app/src/main/jniLibs/arm64-v8a
       - name: Build signed debug APK
         run: gradle :app:assembleDebug --no-daemon
+      - name: Verify APK signing
+        shell: bash
+        run: |
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)"
+          "$APKSIGNER" verify --verbose app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
           name: LensTranslate-offline-signed
