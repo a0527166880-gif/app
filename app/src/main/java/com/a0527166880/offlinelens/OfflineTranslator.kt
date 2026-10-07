@@ -66,7 +66,7 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
         val inputNames = session.inputInfo.keys.toList()
         val outputNames = session.outputInfo.keys.toList()
         val generated = ArrayList<Long>(48)
-        var decoderIds = longArrayOf(2L)
+        var decoderIds = longArrayOf(2L, targetLangId)
 
         for (step in 0 until 48) {
             val inputs = HashMap<String, OnnxTensor>()
@@ -108,12 +108,9 @@ class OfflineTranslator(private val context: android.content.Context) : AutoClos
 
             try {
                 val next = argmaxLastStep(logits)
-                val chosen = if (step == 0) targetLangId else next
-
-                if (chosen == 2L) break
-
-                generated += chosen
-                decoderIds += chosen
+                if (next == 2L) break
+                generated += next
+                decoderIds += next
             } finally {
                 logits.close()
                 result.close()
