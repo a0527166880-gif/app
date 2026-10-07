@@ -26,11 +26,12 @@ class OfflineOcr(private val context: Context) {
         engine.setImage(bitmap)
         val result = engine.utF8Text?.trim().orEmpty()
         engine.clear()
-        result
+        return result
     }
 
     fun close() = synchronized(lock) {
-        api?.end()
+        api?.clear()
+        api?.recycle()
         api = null
         activeLang = null
     }
@@ -38,7 +39,8 @@ class OfflineOcr(private val context: Context) {
     private fun ensureLanguage(language: String) {
         if (activeLang == language && api != null) return
 
-        api?.end()
+        api?.clear()
+        api?.recycle()
         api = null
         activeLang = null
 
