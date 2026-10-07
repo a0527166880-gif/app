@@ -1,7 +1,7 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
 
 android { namespace="com.a0527166880.offlinelens"; compileSdk=36
- defaultConfig { applicationId="com.a0527166880.offlinelens"; minSdk=26; targetSdk=36; versionCode=2; versionName="1.1.0"
+ defaultConfig { applicationId="com.a0527166880.offlinelens"; minSdk=26; targetSdk=36; versionCode=3; versionName="1.1.1"
   ndk { abiFilters += listOf("arm64-v8a") }
  }
  buildFeatures { compose=true }
