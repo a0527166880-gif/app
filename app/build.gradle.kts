@@ -1,7 +1,7 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
 
 android { namespace="com.a0527166880.offlinelens"; compileSdk=36
- defaultConfig { applicationId="com.a0527166880.offlinelens"; minSdk=26; targetSdk=36; versionCode=3; versionName="1.1.1"
+ defaultConfig { applicationId="com.a0527166880.offlinelens"; minSdk=26; targetSdk=36; versionCode=4; versionName="1.1.2"
   ndk { abiFilters += listOf("arm64-v8a") }
  }
  buildFeatures { compose=true }
@@ -22,6 +22,6 @@ dependencies {
  implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
  implementation("ai.djl:api:0.38.0")
  implementation("ai.djl.huggingface:tokenizers:0.38.0")
- runtimeOnly("ai.djl.android:tokenizer-native:0.38.0")
+ runtimeOnly("ai.djl.android:tokenizer-native:0.36.0")
  debugImplementation("androidx.compose.ui:ui-tooling")
 }
