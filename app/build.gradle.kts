@@ -1,7 +1,7 @@
 plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
 
 android { namespace="com.a0527166880.offlinelens"; compileSdk=36
- defaultConfig { applicationId="com.a0527166880.offlinelens"; minSdk=26; targetSdk=36; versionCode=5; versionName="1.1.3"
+ defaultConfig { applicationId="com.a0527166880.offlinelens"; minSdk=26; targetSdk=36; versionCode=6; versionName="1.1.4"
   ndk { abiFilters += listOf("arm64-v8a") }
  }
  buildFeatures { compose=true }
@@ -20,7 +20,7 @@ dependencies {
  implementation("androidx.camera:camera-camera2:1.5.0"); implementation("androidx.camera:camera-lifecycle:1.5.0"); implementation("androidx.camera:camera-view:1.5.0")
  implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
  implementation("com.microsoft.onnxruntime:onnxruntime-android:1.30.0")
- implementation("ai.djl:api:0.39.0")
- implementation("ai.djl.huggingface:tokenizers:0.39.0")
+ implementation("ai.djl:api:0.38.0")
+ implementation("ai.djl.huggingface:tokenizers:0.38.0")
  debugImplementation("androidx.compose.ui:ui-tooling")
 }
